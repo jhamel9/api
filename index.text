@@ -1,216 +1,237 @@
-# PowerShell script to set up college_api with teachers and courses apps
+@echo off
+setlocal enabledelayedexpansion
 
-$projectName = "college_api"
-$apps = @("teachers", "courses")
+echo === Django REST Framework API Setup ===
+echo.
 
-Write-Host "Starting Django project setup: $projectName" -ForegroundColor Green
-
-# Step 1: Create virtual environment
-Write-Host "Creating virtual environment..." -ForegroundColor Cyan
-python -m venv venv
-if (-not $?) { Write-Host "Failed to create virtual environment. Ensure Python is installed." -ForegroundColor Red; exit 1 }
-
-# Step 2: Install Django and DRF
-Write-Host "Installing Django and Django REST Framework..." -ForegroundColor Cyan
-.\venv\Scripts\pip install django djangorestframework
-if (-not $?) { Write-Host "Installation failed." -ForegroundColor Red; exit 1 }
-
-# Step 3: Create Django project
-Write-Host "Creating project '$projectName'..." -ForegroundColor Cyan
-.\venv\Scripts\django-admin startproject $projectName
-if (-not $?) { Write-Host "Failed to create project." -ForegroundColor Red; exit 1 }
-
-Set-Location $projectName
-
-# Step 4: Create apps
-foreach ($app in $apps) {
-    Write-Host "Creating app '$app'..." -ForegroundColor Cyan
-    ..\venv\Scripts\python manage.py startapp $app
-    if (-not $?) { Write-Host "Failed to create app '$app'." -ForegroundColor Red; exit 1 }
-}
-
-# Step 5: Update settings.py to add apps and rest_framework
-Write-Host "Updating settings.py..." -ForegroundColor Cyan
-$settingsPath = "$projectName\settings.py"
-$settingsContent = Get-Content $settingsPath -Raw
-
-# Build the list of installed apps
-$installedApps = @(
-    "'django.contrib.admin'",
-    "'django.contrib.auth'",
-    "'django.contrib.contenttypes'",
-    "'django.contrib.sessions'",
-    "'django.contrib.messages'",
-    "'django.contrib.staticfiles'",
-    "'rest_framework'",
-    "'teachers'",
-    "'courses'"
+:: ---------- Check Python ----------
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo Python not found. Please install Python and add it to PATH.
+    pause
+    exit /b 1
 )
-$appsString = $installedApps -join ",`n    "
 
-$pattern = "INSTALLED_APPS\s*=\s*\[(.*?)\]"
-$replacement = "INSTALLED_APPS = [`n    $appsString`n]"
-$newSettings = $settingsContent -replace $pattern, $replacement -replace '(?m)^\s*$', ''  # clean up empty lines
-Set-Content $settingsPath $newSettings
+:: ---------- 1. Create virtual environment ----------
+if not exist venv (
+    echo Creating virtual environment...
+    python -m venv venv
+    if errorlevel 1 (
+        echo Failed to create virtual environment.
+        pause
+        exit /b 1
+    )
+) else (
+    echo Virtual environment already exists.
+)
 
-# Step 6: Write models.py for teachers
-Write-Host "Creating Teacher model in teachers\models.py..." -ForegroundColor Cyan
-$teacherModel = @"
-from django.db import models
+:: ---------- 2. Activate venv and install packages ----------
+echo Activating virtual environment...
+call venv\Scripts\activate.bat
 
-class Teacher(models.Model):
-    name = models.CharField(max_length=100)
-    department = models.CharField(max_length=100)
-    email = models.CharField(max_length=100)
-    years_of_experience = models.IntegerField()
+echo Installing Django and Django REST Framework...
+pip install django djangorestframework
+if errorlevel 1 (
+    echo Failed to install packages.
+    pause
+    exit /b 1
+)
 
-    def __str__(self):
-        return self.name
-"@
-Set-Content "teachers\models.py" $teacherModel
+:: ---------- 3. Create Django project ----------
+if not exist college_api (
+    echo Creating Django project 'college_api'...
+    django-admin startproject college_api
+    if errorlevel 1 (
+        echo Failed to create project.
+        pause
+        exit /b 1
+    )
+) else (
+    echo Project folder already exists.
+)
 
-# Step 7: Write models.py for courses
-Write-Host "Creating Course model in courses\models.py..." -ForegroundColor Cyan
-$courseModel = @"
-from django.db import models
+cd college_api
 
-class Course(models.Model):
-    course_name = models.CharField(max_length=100)
-    instructor = models.CharField(max_length=100)
-    units = models.IntegerField()
-    semester = models.CharField(max_length=50)
+:: ---------- 4. Create apps ----------
+if not exist teachers (
+    echo Creating app 'teachers'...
+    python manage.py startapp teachers
+)
+if not exist courses (
+    echo Creating app 'courses'...
+    python manage.py startapp courses
+)
 
-    def __str__(self):
-        return self.course_name
-"@
-Set-Content "courses\models.py" $courseModel
+:: ---------- 5. Modify settings.py to add apps and rest_framework ----------
+echo Updating settings.py...
+powershell -Command ^
+    "$settings = Get-Content college_api\settings.py -Raw; " ^
+    "$pattern = '(INSTALLED_APPS\s*=\s*\[)(.*?)(\])'; " ^
+    "$replacement = { param($m) $prefix = $m.Groups[1].Value; $middle = $m.Groups[2].Value; $suffix = $m.Groups[3].Value; " ^
+    "  $apps = @(\"'rest_framework'\", \"'teachers'\", \"'courses'\"); " ^
+    "  foreach ($app in $apps) { if ($middle -notmatch $app) { $middle += \"`n    $app,\" } }; " ^
+    "  return $prefix + $middle + $suffix }; " ^
+    "$newSettings = [regex]::Replace($settings, $pattern, $replacement, 'Singleline'); " ^
+    "Set-Content college_api\settings.py $newSettings"
 
-# Step 8: Write serializers.py for teachers (using ModelSerializer)
-Write-Host "Creating TeacherSerializer in teachers\serializers.py..." -ForegroundColor Cyan
-$teacherSerializer = @"
-from rest_framework import serializers
-from .models import Teacher
+if errorlevel 1 (
+    echo Failed to update settings.py.
+    pause
+    exit /b 1
+)
 
-class TeacherSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Teacher
-        fields = '__all__'
-"@
-Set-Content "teachers\serializers.py" $teacherSerializer
+:: ---------- 6. Write models, serializers, views, urls for each app ----------
+echo Writing models, serializers, views, and URLs...
 
-# Step 9: Write serializers.py for courses
-Write-Host "Creating CourseSerializer in courses\serializers.py..." -ForegroundColor Cyan
-$courseSerializer = @"
-from rest_framework import serializers
-from .models import Course
+:: ----- teachers -----
+powershell -Command ^
+    "$content = @' " ^
+    "from django.db import models`n " ^
+    "class Teacher(models.Model):`n " ^
+    "    name = models.CharField(max_length=100)`n " ^
+    "    department = models.CharField(max_length=100)`n " ^
+    "    email = models.EmailField()`n " ^
+    "    years_of_experience = models.IntegerField()`n " ^
+    "    def __str__(self):`n " ^
+    "        return self.name`n " ^
+    "'@; Set-Content teachers\models.py $content"
 
-class CourseSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Course
-        fields = '__all__'
-"@
-Set-Content "courses\serializers.py" $courseSerializer
+powershell -Command ^
+    "$content = @' " ^
+    "from rest_framework import serializers`n " ^
+    "from .models import Teacher`n " ^
+    "class TeacherSerializer(serializers.ModelSerializer):`n " ^
+    "    class Meta:`n " ^
+    "        model = Teacher`n " ^
+    "        fields = '__all__'`n " ^
+    "'@; Set-Content teachers\serializers.py $content"
 
-# Step 10: Write views.py for teachers
-Write-Host "Creating teacher_list view in teachers\views.py..." -ForegroundColor Cyan
-$teacherViews = @"
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import Teacher
-from .serializers import TeacherSerializer
+powershell -Command ^
+    "$content = @' " ^
+    "from rest_framework.decorators import api_view`n " ^
+    "from rest_framework.response import Response`n " ^
+    "from rest_framework import status`n " ^
+    "from .models import Teacher`n " ^
+    "from .serializers import TeacherSerializer`n " ^
+    "@api_view(['GET', 'POST'])`n " ^
+    "def teacher_list(request):`n " ^
+    "    if request.method == 'GET':`n " ^
+    "        teachers = Teacher.objects.all()`n " ^
+    "        serializer = TeacherSerializer(teachers, many=True)`n " ^
+    "        return Response(serializer.data)`n " ^
+    "    elif request.method == 'POST':`n " ^
+    "        serializer = TeacherSerializer(data=request.data)`n " ^
+    "        if serializer.is_valid():`n " ^
+    "            serializer.save()`n " ^
+    "            return Response(serializer.data, status=status.HTTP_201_CREATED)`n " ^
+    "        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)`n " ^
+    "'@; Set-Content teachers\views.py $content"
 
-@api_view(['GET', 'POST'])
-def teacher_list(request):
-    if request.method == 'GET':
-        teachers = Teacher.objects.all()
-        serializer = TeacherSerializer(teachers, many=True)
-        return Response(serializer.data)
+powershell -Command ^
+    "$content = @' " ^
+    "from django.urls import path`n " ^
+    "from . import views`n " ^
+    "urlpatterns = [`n " ^
+    "    path('teachers/', views.teacher_list),`n " ^
+    "]`n " ^
+    "'@; Set-Content teachers\urls.py $content"
 
-    elif request.method == 'POST':
-        serializer = TeacherSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=400)
-"@
-Set-Content "teachers\views.py" $teacherViews
+:: ----- courses -----
+powershell -Command ^
+    "$content = @' " ^
+    "from django.db import models`n " ^
+    "class Course(models.Model):`n " ^
+    "    course_name = models.CharField(max_length=100)`n " ^
+    "    instructor = models.CharField(max_length=100)`n " ^
+    "    units = models.IntegerField()`n " ^
+    "    semester = models.CharField(max_length=50)`n " ^
+    "    def __str__(self):`n " ^
+    "        return self.course_name`n " ^
+    "'@; Set-Content courses\models.py $content"
 
-# Step 11: Write views.py for courses
-Write-Host "Creating course_list view in courses\views.py..." -ForegroundColor Cyan
-$courseViews = @"
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import Course
-from .serializers import CourseSerializer
+powershell -Command ^
+    "$content = @' " ^
+    "from rest_framework import serializers`n " ^
+    "from .models import Course`n " ^
+    "class CourseSerializer(serializers.ModelSerializer):`n " ^
+    "    class Meta:`n " ^
+    "        model = Course`n " ^
+    "        fields = '__all__'`n " ^
+    "'@; Set-Content courses\serializers.py $content"
 
-@api_view(['GET', 'POST'])
-def course_list(request):
-    if request.method == 'GET':
-        courses = Course.objects.all()
-        serializer = CourseSerializer(courses, many=True)
-        return Response(serializer.data)
+powershell -Command ^
+    "$content = @' " ^
+    "from rest_framework.decorators import api_view`n " ^
+    "from rest_framework.response import Response`n " ^
+    "from rest_framework import status`n " ^
+    "from .models import Course`n " ^
+    "from .serializers import CourseSerializer`n " ^
+    "@api_view(['GET', 'POST'])`n " ^
+    "def course_list(request):`n " ^
+    "    if request.method == 'GET':`n " ^
+    "        courses = Course.objects.all()`n " ^
+    "        serializer = CourseSerializer(courses, many=True)`n " ^
+    "        return Response(serializer.data)`n " ^
+    "    elif request.method == 'POST':`n " ^
+    "        serializer = CourseSerializer(data=request.data)`n " ^
+    "        if serializer.is_valid():`n " ^
+    "            serializer.save()`n " ^
+    "            return Response(serializer.data, status=status.HTTP_201_CREATED)`n " ^
+    "        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)`n " ^
+    "'@; Set-Content courses\views.py $content"
 
-    elif request.method == 'POST':
-        serializer = CourseSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=400)
-"@
-Set-Content "courses\views.py" $courseViews
+powershell -Command ^
+    "$content = @' " ^
+    "from django.urls import path`n " ^
+    "from . import views`n " ^
+    "urlpatterns = [`n " ^
+    "    path('courses/', views.course_list),`n " ^
+    "]`n " ^
+    "'@; Set-Content courses\urls.py $content"
 
-# Step 12: Write urls.py for teachers
-Write-Host "Creating teachers\urls.py..." -ForegroundColor Cyan
-$teacherUrls = @"
-from django.urls import path
-from . import views
+:: ---------- 7. Write project urls.py ----------
+echo Updating project URLs...
+powershell -Command ^
+    "$content = @' " ^
+    "from django.contrib import admin`n " ^
+    "from django.urls import path, include`n " ^
+    "urlpatterns = [`n " ^
+    "    path('admin/', admin.site.urls),`n " ^
+    "    path('api/', include('teachers.urls')),`n " ^
+    "    path('api/', include('courses.urls')),`n " ^
+    "]`n " ^
+    "'@; Set-Content college_api\urls.py $content"
 
-urlpatterns = [
-    path('teachers/', views.teacher_list),
-]
-"@
-Set-Content "teachers\urls.py" $teacherUrls
+:: ---------- 8. Run migrations ----------
+echo Running migrations...
+python manage.py makemigrations
+if errorlevel 1 (
+    echo makemigrations failed.
+    pause
+    exit /b 1
+)
+python manage.py migrate
+if errorlevel 1 (
+    echo migrate failed.
+    pause
+    exit /b 1
+)
 
-# Step 13: Write urls.py for courses
-Write-Host "Creating courses\urls.py..." -ForegroundColor Cyan
-$courseUrls = @"
-from django.urls import path
-from . import views
+:: ---------- 9. Done ----------
+echo.
+echo === Setup complete! ===
+echo You can now start the development server:
+echo   cd college_api
+echo   python manage.py runserver
+echo.
+echo Test the APIs at:
+echo   GET / POST http://127.0.0.1:8000/api/teachers/
+echo   GET / POST http://127.0.0.1:8000/api/courses/
 
-urlpatterns = [
-    path('courses/', views.course_list),
-]
-"@
-Set-Content "courses\urls.py" $courseUrls
+set /p choice="Do you want to start the server now? (y/n) "
+if /i "!choice!"=="y" (
+    echo Starting server... Press Ctrl+C to stop.
+    python manage.py runserver
+)
 
-# Step 14: Update project urls.py to include both apps
-Write-Host "Updating project urls.py..." -ForegroundColor Cyan
-$projectUrlsPath = "$projectName\urls.py"
-$projectUrlsContent = @"
-from django.contrib import admin
-from django.urls import path, include
-
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', include('teachers.urls')),
-    path('', include('courses.urls')),
-]
-"@
-Set-Content $projectUrlsPath $projectUrlsContent
-
-# Step 15: Run migrations
-Write-Host "Running migrations..." -ForegroundColor Cyan
-..\venv\Scripts\python manage.py makemigrations
-if (-not $?) { Write-Host "makemigrations failed." -ForegroundColor Red; exit 1 }
-..\venv\Scripts\python manage.py migrate
-if (-not $?) { Write-Host "migrate failed." -ForegroundColor Red; exit 1 }
-
-# Step 16: Create superuser (optional - you can skip by commenting out)
-Write-Host "Creating superuser (you will be prompted)..." -ForegroundColor Cyan
-..\venv\Scripts\python manage.py createsuperuser
-
-Write-Host "Setup complete!" -ForegroundColor Green
-Write-Host "To start the server:" -ForegroundColor Yellow
-Write-Host "   cd $projectName"
-Write-Host "   ..\venv\Scripts\python manage.py runserver"
-Write-Host "Then visit: http://127.0.0.1:8000/teachers/ and http://127.0.0.1:8000/courses/" -ForegroundColor Yellow
+pause
