@@ -1,15 +1,14 @@
-# PowerShell script to set up Django + DRF project with a sample Book API
+# PowerShell script to set up college_api with teachers and courses apps
 
-# Configuration
-$projectName = "myproject"
-$appName = "myapp"
+$projectName = "college_api"
+$apps = @("teachers", "courses")
 
-Write-Host "Starting Django + DRF project setup..." -ForegroundColor Green
+Write-Host "Starting Django project setup: $projectName" -ForegroundColor Green
 
 # Step 1: Create virtual environment
 Write-Host "Creating virtual environment..." -ForegroundColor Cyan
 python -m venv venv
-if (-not $?) { Write-Host "Failed to create virtual environment. Make sure Python is installed." -ForegroundColor Red; exit 1 }
+if (-not $?) { Write-Host "Failed to create virtual environment. Ensure Python is installed." -ForegroundColor Red; exit 1 }
 
 # Step 2: Install Django and DRF
 Write-Host "Installing Django and Django REST Framework..." -ForegroundColor Cyan
@@ -17,124 +16,201 @@ Write-Host "Installing Django and Django REST Framework..." -ForegroundColor Cya
 if (-not $?) { Write-Host "Installation failed." -ForegroundColor Red; exit 1 }
 
 # Step 3: Create Django project
-Write-Host "Creating Django project '$projectName'..." -ForegroundColor Cyan
+Write-Host "Creating project '$projectName'..." -ForegroundColor Cyan
 .\venv\Scripts\django-admin startproject $projectName
 if (-not $?) { Write-Host "Failed to create project." -ForegroundColor Red; exit 1 }
 
-# Step 4: Create app
-Write-Host "Creating app '$appName'..." -ForegroundColor Cyan
 Set-Location $projectName
-..\venv\Scripts\python manage.py startapp $appName
-if (-not $?) { Write-Host "Failed to create app." -ForegroundColor Red; exit 1 }
 
-# Step 5: Update settings.py to add apps
+# Step 4: Create apps
+foreach ($app in $apps) {
+    Write-Host "Creating app '$app'..." -ForegroundColor Cyan
+    ..\venv\Scripts\python manage.py startapp $app
+    if (-not $?) { Write-Host "Failed to create app '$app'." -ForegroundColor Red; exit 1 }
+}
+
+# Step 5: Update settings.py to add apps and rest_framework
 Write-Host "Updating settings.py..." -ForegroundColor Cyan
 $settingsPath = "$projectName\settings.py"
 $settingsContent = Get-Content $settingsPath -Raw
 
-# Insert 'rest_framework' and the app into INSTALLED_APPS
+# Build the list of installed apps
+$installedApps = @(
+    "'django.contrib.admin'",
+    "'django.contrib.auth'",
+    "'django.contrib.contenttypes'",
+    "'django.contrib.sessions'",
+    "'django.contrib.messages'",
+    "'django.contrib.staticfiles'",
+    "'rest_framework'",
+    "'teachers'",
+    "'courses'"
+)
+$appsString = $installedApps -join ",`n    "
+
 $pattern = "INSTALLED_APPS\s*=\s*\[(.*?)\]"
-$replacement = @"
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    '$appName',
-]
-"@
-$newSettings = $settingsContent -replace $pattern, $replacement
+$replacement = "INSTALLED_APPS = [`n    $appsString`n]"
+$newSettings = $settingsContent -replace $pattern, $replacement -replace '(?m)^\s*$', ''  # clean up empty lines
 Set-Content $settingsPath $newSettings
 
-# Step 6: Create model (Book) in models.py
-Write-Host "Creating model in $appName\models.py..." -ForegroundColor Cyan
-$modelContent = @"
+# Step 6: Write models.py for teachers
+Write-Host "Creating Teacher model in teachers\models.py..." -ForegroundColor Cyan
+$teacherModel = @"
 from django.db import models
 
-class Book(models.Model):
-    title = models.CharField(max_length=200)
-    author = models.CharField(max_length=100)
-    published_date = models.DateField()
+class Teacher(models.Model):
+    name = models.CharField(max_length=100)
+    department = models.CharField(max_length=100)
+    email = models.CharField(max_length=100)
+    years_of_experience = models.IntegerField()
 
     def __str__(self):
-        return self.title
+        return self.name
 "@
-Set-Content "$appName\models.py" $modelContent
+Set-Content "teachers\models.py" $teacherModel
 
-# Step 7: Run migrations
-Write-Host "Running migrations..." -ForegroundColor Cyan
-..\venv\Scripts\python manage.py makemigrations
-..\venv\Scripts\python manage.py migrate
-if (-not $?) { Write-Host "Migrations failed." -ForegroundColor Red; exit 1 }
+# Step 7: Write models.py for courses
+Write-Host "Creating Course model in courses\models.py..." -ForegroundColor Cyan
+$courseModel = @"
+from django.db import models
 
-# Step 8: Create serializer
-Write-Host "Creating serializer in $appName\serializers.py..." -ForegroundColor Cyan
-$serializerContent = @"
+class Course(models.Model):
+    course_name = models.CharField(max_length=100)
+    instructor = models.CharField(max_length=100)
+    units = models.IntegerField()
+    semester = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.course_name
+"@
+Set-Content "courses\models.py" $courseModel
+
+# Step 8: Write serializers.py for teachers (using ModelSerializer)
+Write-Host "Creating TeacherSerializer in teachers\serializers.py..." -ForegroundColor Cyan
+$teacherSerializer = @"
 from rest_framework import serializers
-from .models import Book
+from .models import Teacher
 
-class BookSerializer(serializers.ModelSerializer):
+class TeacherSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Book
+        model = Teacher
         fields = '__all__'
 "@
-Set-Content "$appName\serializers.py" $serializerContent
+Set-Content "teachers\serializers.py" $teacherSerializer
 
-# Step 9: Create view (ModelViewSet)
-Write-Host "Creating view in $appName\views.py..." -ForegroundColor Cyan
-$viewsContent = @"
-from rest_framework import viewsets
-from .models import Book
-from .serializers import BookSerializer
+# Step 9: Write serializers.py for courses
+Write-Host "Creating CourseSerializer in courses\serializers.py..." -ForegroundColor Cyan
+$courseSerializer = @"
+from rest_framework import serializers
+from .models import Course
 
-class BookViewSet(viewsets.ModelViewSet):
-    queryset = Book.objects.all()
-    serializer_class = BookSerializer
+class CourseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Course
+        fields = '__all__'
 "@
-Set-Content "$appName\views.py" $viewsContent
+Set-Content "courses\serializers.py" $courseSerializer
 
-# Step 10: Create app-level urls.py
-Write-Host "Creating app-level urls.py..." -ForegroundColor Cyan
-$appUrlsContent = @"
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from .views import BookViewSet
+# Step 10: Write views.py for teachers
+Write-Host "Creating teacher_list view in teachers\views.py..." -ForegroundColor Cyan
+$teacherViews = @"
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Teacher
+from .serializers import TeacherSerializer
 
-router = DefaultRouter()
-router.register(r'books', BookViewSet)
+@api_view(['GET', 'POST'])
+def teacher_list(request):
+    if request.method == 'GET':
+        teachers = Teacher.objects.all()
+        serializer = TeacherSerializer(teachers, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = TeacherSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+"@
+Set-Content "teachers\views.py" $teacherViews
+
+# Step 11: Write views.py for courses
+Write-Host "Creating course_list view in courses\views.py..." -ForegroundColor Cyan
+$courseViews = @"
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Course
+from .serializers import CourseSerializer
+
+@api_view(['GET', 'POST'])
+def course_list(request):
+    if request.method == 'GET':
+        courses = Course.objects.all()
+        serializer = CourseSerializer(courses, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        serializer = CourseSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+"@
+Set-Content "courses\views.py" $courseViews
+
+# Step 12: Write urls.py for teachers
+Write-Host "Creating teachers\urls.py..." -ForegroundColor Cyan
+$teacherUrls = @"
+from django.urls import path
+from . import views
 
 urlpatterns = [
-    path('', include(router.urls)),
+    path('teachers/', views.teacher_list),
 ]
 "@
-Set-Content "$appName\urls.py" $appUrlsContent
+Set-Content "teachers\urls.py" $teacherUrls
 
-# Step 11: Update project-level urls.py to include app URLs
+# Step 13: Write urls.py for courses
+Write-Host "Creating courses\urls.py..." -ForegroundColor Cyan
+$courseUrls = @"
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('courses/', views.course_list),
+]
+"@
+Set-Content "courses\urls.py" $courseUrls
+
+# Step 14: Update project urls.py to include both apps
 Write-Host "Updating project urls.py..." -ForegroundColor Cyan
 $projectUrlsPath = "$projectName\urls.py"
-$projectUrlsContent = Get-Content $projectUrlsPath -Raw
+$projectUrlsContent = @"
+from django.contrib import admin
+from django.urls import path, include
 
-# Add include for api/
-$pattern = "from django.urls import path"
-$replacement = "from django.urls import path, include"
-$projectUrlsContent = $projectUrlsContent -replace $pattern, $replacement
-
-$pattern = "urlpatterns\s*=\s*\[(.*?)\]"
-$replacement = @"
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('$appName.urls')),
+    path('', include('teachers.urls')),
+    path('', include('courses.urls')),
 ]
 "@
-$projectUrlsContent = $projectUrlsContent -replace $pattern, $replacement
 Set-Content $projectUrlsPath $projectUrlsContent
 
-# Done
+# Step 15: Run migrations
+Write-Host "Running migrations..." -ForegroundColor Cyan
+..\venv\Scripts\python manage.py makemigrations
+if (-not $?) { Write-Host "makemigrations failed." -ForegroundColor Red; exit 1 }
+..\venv\Scripts\python manage.py migrate
+if (-not $?) { Write-Host "migrate failed." -ForegroundColor Red; exit 1 }
+
+# Step 16: Create superuser (optional - you can skip by commenting out)
+Write-Host "Creating superuser (you will be prompted)..." -ForegroundColor Cyan
+..\venv\Scripts\python manage.py createsuperuser
+
 Write-Host "Setup complete!" -ForegroundColor Green
-Write-Host "To run the server:" -ForegroundColor Yellow
+Write-Host "To start the server:" -ForegroundColor Yellow
 Write-Host "   cd $projectName"
 Write-Host "   ..\venv\Scripts\python manage.py runserver"
-Write-Host "Then visit: http://127.0.0.1:8000/api/books/" -ForegroundColor Yellow
+Write-Host "Then visit: http://127.0.0.1:8000/teachers/ and http://127.0.0.1:8000/courses/" -ForegroundColor Yellow
